@@ -1,7 +1,8 @@
 import math
+from collections import defaultdict
 import networkx as nx
 
-# 1. Pixel coordinates for p1 through p29
+# 1. Pixelkoordinater för p1 till p29
 COORDS = {
     "p1": (17, 417),   "p2": (84, 442),   "p3": (114, 342),
     "p4": (67, 321),   "p5": (83, 285),   "p6": (229, 319),
@@ -15,7 +16,7 @@ COORDS = {
     "p28": (125, 299), "p29": (265, 237)
 }
 
-# 2. Main road topology
+# 2. Huvudvägarnas topologi
 ADJACENCY = {
     "p1": ["p2"],
     "p2": ["p1", "p3"],
@@ -48,28 +49,33 @@ ADJACENCY = {
     "p29": ["p19", "p25", "p11"]
 }
 
-# 3. Company-to-booth mapping
-COMPANIES = {
-    "Ericsson": "p26",
-    "Atlas Copco": "p11",
-    "Nordea": "p10",
-    "Revolut": "p25",
-    "Svenska kärnkraft": "p16",
-    "PWC": "p17",
-    "Comsol": "p14",
-    "Digpro solutions": "p21",
-    "Flygresor.se": "p22",
-    "Folksam": "p6",
-    "Ida infront": "p7",
-    "Lynx asset": "p21",
-    "megger": "p14",
-    "monitor erp": "p23",
-    "Net insight": "p23",
-    "treasury systems": "p11",
-    "truesec": "p23"
-}
+# 3. Alla 17 företag kopplade till respektive nod
+COMPANIES = [
+    ("Ericsson", "p26"),
+    ("Atlas Copco", "p11"),
+    ("Nordea", "p10"),
+    ("Revolut", "p25"),
+    ("Svenska kärnkraft", "p16"),
+    ("PwC", "p17"),
+    ("Comsol", "p14"),
+    ("Digpro solutions", "p21"),
+    ("Flygresor.se", "p22"),
+    ("Folksam", "p6"),
+    ("Ida infront", "p7"),
+    ("Lynx asset", "p21"),
+    ("Megger", "p14"),
+    ("Monitor ERP", "p23"),
+    ("Net insight", "p23"),
+    ("Treasury systems", "p11"),
+    ("Truesec", "p23"),
+]
 
-# 4. Build graph with physical Euclidean edge weights
+# Gruppera företag per nod
+node_to_companies = defaultdict(list)
+for company, node in COMPANIES:
+    node_to_companies[node].append(company)
+
+# 4. Bygg graf med euklidiska avstånd som kantvikter
 G = nx.Graph()
 for u, neighbors in ADJACENCY.items():
     x1, y1 = COORDS[u]
@@ -78,22 +84,21 @@ for u, neighbors in ADJACENCY.items():
         dist = math.hypot(x2 - x1, y2 - y1)
         G.add_edge(u, v, weight=dist)
 
-# 5. Extract unique targets + start node
 START_NODE = "p1"
-unique_targets = sorted(list(set(COMPANIES.values())))
+unique_targets = sorted(list(node_to_companies.keys()))
 tour_nodes = [START_NODE] + [t for t in unique_targets if t != START_NODE]
 n = len(tour_nodes)
 
-# Precompute all-pairs shortest paths using Dijkstra
+# Beräkna kortaste vägen mellan alla målnoder via Dijkstra
 all_pairs_dist = dict(nx.all_pairs_dijkstra_path_length(G, weight="weight"))
 all_pairs_path = dict(nx.all_pairs_dijkstra_path(G, weight="weight"))
 
 cost_matrix = [[all_pairs_dist[tour_nodes[i]][tour_nodes[j]] for j in range(n)] for i in range(n)]
 
-# 6. Held-Karp Dynamic Programming (Exact TSP)
+# 5. Held-Karp dynamisk programmering (exakt TSP)
 memo = {}
 
-def held_karp(mask, u):
+def solve_tsp(mask, u):
     if mask == (1 << n) - 1:
         return cost_matrix[u][0], [0]
     state = (mask, u)
@@ -104,7 +109,7 @@ def held_karp(mask, u):
     best_path = []
     for v in range(n):
         if not (mask & (1 << v)):
-            dist, path = held_karp(mask | (1 << v), v)
+            dist, path = solve_tsp(mask | (1 << v), v)
             total = cost_matrix[u][v] + dist
             if total < best_dist:
                 best_dist = total
@@ -113,23 +118,25 @@ def held_karp(mask, u):
     memo[state] = (best_dist, best_path)
     return best_dist, best_path
 
-total_distance, optimal_idx_path = held_karp(1, 0)
-node_order = [tour_nodes[i] for i in [0] + optimal_idx_path]
+total_dist, opt_indices = solve_tsp(1, 0)
+optimal_node_order = [tour_nodes[i] for i in [0] + opt_indices]
 
-# 7. Print Output
-print(f"Total Optimal Walking Distance: {total_distance:.1f} pixels\n")
-print("Target Visiting Sequence:")
-for node in node_order[1:-1]:
-    visited_companies = [c for c, nd in COMPANIES.items() if nd == node]
-    print(f"  Stop at {node:4s} -> {', '.join(visited_companies)}")
+# 6. Skriv ut besöksordning för samtliga 17 företag
+print(f"Total optimal gångsträcka: {total_dist:.1f} pixlar\n")
+print("Optimal besöksordning för alla 17 företag:")
+stop_idx = 1
+for node in optimal_node_order[1:-1]:
+    for comp in node_to_companies[node]:
+        print(f"  Stopp {stop_idx:2d}: {comp:<20} (Nod: {node})")
+        stop_idx += 1
 
-print("\nTurn-by-Turn Waypoint Navigation:")
-full_path = []
-for i in range(len(node_order) - 1):
-    leg = all_pairs_path[node_order[i]][node_order[i+1]]
-    if full_path:
-        full_path.extend(leg[1:])
+print("\nKomplett nod-för-nod-navigering:")
+full_route = []
+for i in range(len(optimal_node_order) - 1):
+    leg = all_pairs_path[optimal_node_order[i]][optimal_node_order[i+1]]
+    if full_route:
+        full_route.extend(leg[1:])
     else:
-        full_path.extend(leg)
+        full_route.extend(leg)
 
-print(" -> ".join(full_path))
+print(" -> ".join(full_route))
